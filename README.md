@@ -1,6 +1,6 @@
 by CrazyCat - irc.zeolia.net
 
-# ChanRelay v3.11
+# ChanRelay v3.12
 [![ko-fi](https://www.ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/crazycat)
 
 This TCL is a complete relay script wich works with botnet.
@@ -15,6 +15,10 @@ You can use it as a spy or a full duplex communication tool.
 It don't mind if the eggdrops are on the same server or not, it just mind about the channels and the handle of each eggdrop.
 
 ## CHANGELOG
+
+### 3.12
+- Added colors for actions and non-message
+
 ### 3.11
 - Made the "oper" setting functionnal
 - Removed MDS support
