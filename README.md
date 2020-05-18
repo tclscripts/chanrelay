@@ -17,7 +17,7 @@ It don't mind if the eggdrops are on the same server or not, it just mind about 
 ## CHANGELOG
 
 ### 3.12
-- Added colors for actions and non-message
+- Added colors for jpq / act and modes
 
 ### 3.11
 - Made the "oper" setting functionnal
