@@ -1,6 +1,6 @@
 by CrazyCat - irc.zeolia.net
 
-# ChanRelay v3.12
+# ChanRelay v3.14
 [![ko-fi](https://www.ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/crazycat)
 
 This TCL is a complete relay script wich works with botnet.
@@ -15,6 +15,12 @@ You can use it as a spy or a full duplex communication tool.
 It don't mind if the eggdrops are on the same server or not, it just mind about the channels and the handle of each eggdrop.
 
 ## CHANGELOG
+### 3.14 - The Pi edition
+- Now it is possible to change the (user@network) displayed. Just add the usermask correct value in settings (*%nick%* and *%network%* are dynamic variables). Think to escape chars as [] or {}
+
+### 3.13
+- Modified join/part/quit procs
+- Add a limit to message length
 
 ### 3.12
 - Added colors for jpq / act and modes
