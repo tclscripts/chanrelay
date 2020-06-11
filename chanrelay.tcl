@@ -1,11 +1,14 @@
-# chanrelay.tcl 3.12
+# chanrelay.tcl 3.14
 #
 # A way to link your channels
 #
 # Author: CrazyCat <crazycat@c-p-f.org>
 # http://www.eggdrop.fr
 # irc.zeolia.net #eggdrop
-
+#
+# Declare issues at https://gitlab.com/tcl-scripts/chanrelay
+# No issue means no bug :)
+#
 ## DESCRIPTION ##
 #
 # This TCL is a complete relay script wich works with botnet.
@@ -18,6 +21,16 @@
 # it just mind about the channels and the handle of each eggdrop.
 
 ## CHANGELOG ##
+#
+# 3.14 - The Pi edition :)
+# Now possible to change the (user@network) displayed
+#   just add the usermask correct value in settings
+#   %nick% and %network% are dynamic variables
+#   Think to escape chars as [] or {}
+#
+# 3.13
+# Modified join/part/quit procs
+# Add a limit to message length
 #
 # 3.12
 # Added colors for actions and non-message
@@ -130,6 +143,9 @@
 # * transmit (y/n): does eggdrop transmit his channel activity ?
 # * receive (y/n): does eggdrop diffuse other channels activity ?
 # * oper (y/n): does the eggdrop accept @ commands (topic, kick, ban) ?
+# * syn_topic (y/n): if set to Yes, the eggdrop will
+#   synchronize the channel topic when changed on
+#   another chan of the relay
 #
 # userlist(beg) is the sentence announcing the start of !who
 # userlist(end) is the sentence announcing the end of !who
@@ -150,6 +166,10 @@ namespace eval crelay {
 		"log"       "y"
 		"oper"      "y"
 		"syn_topic" "y"
+		"col_act"   "lightred"
+		"col_jpq"   "lightblue"
+		"col_mode"  "green"
+		"usermask"	"\[%network%\] <%nick%>"
 	}
 
 	set regg(CrazyEgg) {
@@ -164,6 +184,8 @@ namespace eval crelay {
 		"network"   "Europnet"
 	}
 
+	# You can edit values but not remove
+	# or you'll break the system
 	set default {
 		"highlight" 1
 		"snet"      "y"
@@ -172,8 +194,10 @@ namespace eval crelay {
 		"log"       "n"
 		"oper"      "n"
 		"syn_topic" "n"
-		"col_act"   "red"
-		"col_info"   "green"
+		"col_act"   "purple"
+		"col_jpq"   "cyan"
+		"col_mode"  "green"
+		"usermask"	"(%nick%@%network%)"
 	}
 
 	# Fill this list with the nick of the users
@@ -235,8 +259,11 @@ namespace eval crelay {
 	# Path and name of the logfile (used for debug)
 	variable logfile "databases/chanrelay.log"
 
+	# max length of a message
+	variable msglen 350
+	
 	variable author "CrazyCat"
-	variable version "3.12"
+	variable version "3.13"
 }
 
 ####################################
@@ -346,6 +373,9 @@ proc ::crelay::preload {args} {
 				snet { set ::crelay::me(snet) [lindex $lset 1] }
 				highlight { set ::crelay::me(highligt) [lindex $lset 1] }
 				syn_topic { set ::crelay::me(syn_topic) [lindex $lset 1] }
+				col_act { set ::crelay::me(col_act) [lindex $lset 1] }
+				col_mode { set ::crelay::me(col_mode) [lindex $lset 1] }
+				col_jpq { set ::crelay::me(col_jpq) [lindex $lset 1] }
 				default {
 					set ::crelay::[lindex $lset 0] [lindex $lset 1]
 				}
@@ -364,6 +394,9 @@ proc ::crelay::save {args} {
 	puts $fp "receive|$::crelay::me(receive)"
 	puts $fp "snet|$::crelay::me(snet)"
 	puts $fp "highlight|$::crelay::me(highlight)"
+	puts $fp "col_act|$::crelay::me(col_act)"
+	puts $fp "col_mode|$::crelay::me(col_mode)"
+	puts $fp "col_jpq|$::crelay::me(col_jpq)"
 	puts $fp "trans_pub|$::crelay::trans_pub"
 	puts $fp "trans_act|$::crelay::trans_act"
 	puts $fp "trans_nick|$::crelay::trans_nick"
@@ -428,17 +461,19 @@ namespace eval crelay {
 		}
 	}
 	
-	variable colors { "white" "\00300" "black" "\00301" "navy" "\00302" "green" "\00303"
-		"red" "\00304" "maroon" "\00305" "purple" "\00306" "olive" "\00307"
-		"yellow" "\00308" "lightgreen" "\00309" "teal" "\00310" "cyan" "\00311"
-		"royalblue" "\00312" "magenta" "\00313" "gray" "\00314" "lightgray" "\00315" }
+	variable colors { "white" "\00300" "black" "\00301" "blue" "\00302" "green" "\00303"
+		"lightred" "\00304" "brown" "\00305" "purple" "\00306" "orange" "\00307"
+		"yellow" "\00308" "lightgreen" "\00309" "cyan" "\00310" "lightcyan" "\00311"
+		"lightblue" "\00312" "pink" "\00313" "grey" "\00314" "lightgrey" "\00315" }
 
 	proc colorize {type text} {
 		set text [stripcodes abcgru $text]
 		if {$type eq "act" && $::crelay::me(col_act) ne ""} {
 			set text "[::tcl::string::map $::crelay::colors $::crelay::me(col_act)]$text\003"
-		} elseif {$type eq "info" && $::crelay::me(col_info) ne ""} {
-			set text "[::tcl::string::map $::crelay::colors $::crelay::me(col_info)]$text\003"
+		} elseif {$type eq "mode" && $::crelay::me(col_mode) ne ""} {
+			set text "[::tcl::string::map $::crelay::colors $::crelay::me(col_mode)]$text\003"
+		} elseif { $type eq "jpq" && $::crelay::me(col_jpq) ne ""} {
+			set text "[::tcl::string::map $::crelay::colors $::crelay::me(col_jpq)]$text\003"
 		}
 		return $text
 	}
@@ -597,22 +632,22 @@ namespace eval crelay {
 	}
 	
 	# Generates an user@network name
-	# based on nick and from bot
+	# based on nick and from bot using usermask setting
 	proc make:user { nick frm_bot } {
 		if {[string length $::crelay::hlnick] > 0 } {
 			set ehlnick [string index $::crelay::hlnick 0]
 		} else {
 			set ehlnick ""
 		}
+		set umask $::crelay::me(usermask)
 		array set him $::crelay::regg($frm_bot)
+		regsub -all %network% $umask $him(network) umask
 		if {$nick == "*"} {
-			set speaker [concat "$::crelay::hlnick$him(network)$ehlnick"]
+			regsub -all {(%nick%|@)} $umask "" umask
+			set speaker [concat "$::crelay::hlnick$umask$ehlnick"]
 		} else {
-			if { $::crelay::me(snet) == "y" } {
-				set speaker [concat "$::crelay::hlnick\($nick@$him(network)\)$ehlnick"]
-			} else {
-				set speaker $::crelay::hlnick$nick$ehlnick
-			}
+			regsub -all %nick% $umask $nick umask
+			set speaker $::crelay::hlnick$umask$ehlnick
 		}
 		return $speaker
 	}
@@ -638,9 +673,9 @@ namespace eval crelay {
 		set ::crelay::eob 0
 		if {[string tolower $chan] == [string tolower $::crelay::me(chan)]} {
 			foreach bot [array names ::crelay::regg] {
-				if {$bot != $::botnick && [islinked $bot]} {
+				if {$bot != $::username && [islinked $bot]} {
 					putbot $bot $transmsg
-					if { $::crelay::debug == 1 } { dlog "Sent to $bot : $transmg" }
+					if { $::crelay::debug == 1 } { dlog "Sent to $bot : $transmsg" }
 					if {$usercmd == ">who" } { incr ::crelay::eob }
 				}
 			}
@@ -657,9 +692,10 @@ namespace eval crelay {
 		if { [string tolower [lindex [split $text] 0]] == "@mode" } { return 0; }
 		if { [string tolower [lindex [split $text] 0]] == "@ban" } { return 0; }
 		if { [string tolower [lindex [split $text] 0]] == "@kick" } { return 0; }
-		if { $::crelay::debug == 1 } { dlog "Prepare transmission : >pub $chan $nick [join [split $text]]" }
-		::crelay::trans:bot ">pub" $chan $nick [join [split $text]]
-		
+		foreach splmsg [::crelay::split_line $text [expr {$::crelay::msglen - [::tcl::string::length [::crelay::make:user $nick $::username]]}]] {
+			if { $::crelay::debug == 1 } { dlog "Prepare transmission : >pub $chan $nick $splmsg" }
+			::crelay::trans:bot ">pub" $chan $nick $splmsg
+		}
 	}
 	
 	# proc transmission of action (trans_act = y)
@@ -678,7 +714,7 @@ namespace eval crelay {
 	# proc transmission of join
 	proc trans:join {nick uhost hand chan} {
 		if { $::crelay::debug == 1 } { dlog "Prepare transmission : >join $chan $chan $nick" }
-		::crelay::trans:bot ">join" $chan $chan $nick
+		::crelay::trans:bot ">join" $chan $chan "$nick!$uhost"
 	}
 	
 	# proc transmission of part
@@ -786,7 +822,7 @@ namespace eval crelay {
 			set argl [split $arg]
 			set speaker [::crelay::make:user [lindex $argl 0] $frm_bot]
 			if { $::crelay::debug == 1 } { dlog "Sending nick [join [lrange $argl 1 end]] to $::crelay::me(chan)" }
-			set text [::crelay::colorize "info" "*** $speaker is now known as [join [lrange $argl 1 end]]"]
+			set text [::crelay::colorize "jpq" "*** $speaker is now known as [join [lrange $argl 1 end]]"]
 			putquick "PRIVMSG $::crelay::me(chan) :$text"
 			::crelay::cr:log j "$::crelay::me(chan)" "Nick change: [lindex $argl 0] -> [join [lrange $argl 1 end]]"
 		} else {
@@ -800,9 +836,9 @@ namespace eval crelay {
 		if { $::crelay::debug == 1 } { dlog "Received $command from $frm_bot" }
 		if {[set him [lsearch $::crelay::eggdrops $frm_bot]] >= 0} {
 			set argl [split $arg]
-			set speaker [::crelay::make:user [lindex $argl 1] $frm_bot]
+			set speaker [lindex $argl 1]
 			if { $::crelay::debug == 1 } { dlog "Sending join [join [lrange $argl 1 end]] to $::crelay::me(chan)" }
-			set text [::crelay::colorize "info" "--> $speaker has joined channel [lindex $argl 0]"]
+			set text [::crelay::colorize "jpq" "--> $speaker has joined channel [lindex $argl 0]@[lindex $::crelay::networks $him]"]
 			putquick "PRIVMSG $::crelay::me(chan) :$text"
 			::crelay::cr:log j "$::crelay::me(chan)" "[lindex $argl 1] joined $::crelay::me(chan)."
 		} else {
@@ -818,7 +854,13 @@ namespace eval crelay {
 			set argl [split $arg]
 			set speaker [::crelay::make:user [lindex $argl 0] $frm_bot]
 			if { $::crelay::debug == 1 } { dlog "Sending part [join [lrange $argl 1 end]] to $::crelay::me(chan)" }
-			set text [::crelay::colorize "info" "<-- $speaker has left channel [lindex $argl 1] ([join [lrange $argl 2 end]])"]
+			if {[llength $argl]<4} {
+				set partmsg ""
+			} else {
+				set partmsg " ([join [lrange $argl 2 end]])"
+			}
+			#set text [::crelay::colorize "jpq" "<-- $speaker has left channel [lindex $argl 1] ([join [lrange $argl 2 end]])"]
+			set text [::crelay::colorize "jpq" "<-- $speaker has left channel [lindex $argl 1]$partmsg"]
 			putquick "PRIVMSG $::crelay::me(chan) :$text"
 			::crelay::cr:log j "$::crelay::me(chan)" "[lindex $argl 0] left $::crelay::me(chan) ([join [lrange $argl 2 end]])"
 		} else {
@@ -833,10 +875,16 @@ namespace eval crelay {
 		if {[set him [lsearch $::crelay::eggdrops $frm_bot]] >= 0} {
 			set argl [split $arg]
 			set speaker [::crelay::make:user [lindex $argl 0] $frm_bot]
+			if {[llength $argl]<3} {
+				set quitmsg ""
+			} else {
+				set quitmsg " ([join [lrange $argl 1 end]])"
+			}
 			if { $::crelay::debug == 1 } { dlog "Sending quit [join [lrange $argl 1 end]] to $::crelay::me(chan)" }
-			set text [::crelay::colorize "info" "-//- $speaker has quit ([join [lrange $argl 1 end]])"]
+			#set text [::crelay::colorize "jpq" "-//- $speaker has quit ([join [lrange $argl 1 end]])"]
+			set text [::crelay::colorize "jpq" "-//- $speaker has quit$quitmsg"]
 			putquick "PRIVMSG $::crelay::me(chan) :$text"
-			::crelay::cr:log j "$::crelay::me(chan)" "[lindex $argl 0] left irc: [join [lrange $argl 1 end]]"
+			::crelay::cr:log j "$::crelay::me(chan)" "[lindex $argl 0] left irc: ([join [lrange $argl 1 end]])"
 		} else {
 			if { $::crelay::debug == 1 } { dlog "$frm_bot is unknown" }
 		}
@@ -868,7 +916,7 @@ namespace eval crelay {
 			set argl [split $arg]
 			set speaker [::crelay::make:user [lindex $argl 1] $frm_bot]
 			if { $::crelay::debug == 1 } { dlog "Sending kick [join [lrange $argl 1 end]] to $::crelay::me(chan)" }
-			set text [::crelay::colorize "info" "*** $speaker has been kicked from [lindex $argl 2] by [lindex $argl 0]: [join [lrange $argl 3 end]]"]
+			set text [::crelay::colorize "jpq" "*** $speaker has been kicked from [lindex $argl 2] by [lindex $argl 0]: [join [lrange $argl 3 end]]"]
 			putquick "PRIVMSG $::crelay::me(chan) :$text"
 			::crelay::cr:log k "$::crelay::me(chan)" "[lindex $argl 1] kicked from $::crelay::me(chan) by [lindex $argl 0]:[join [lrange $argl 3 end]]"
 		} else {
@@ -884,7 +932,7 @@ namespace eval crelay {
 			set argl [split $arg]
 			set speaker [::crelay::make:user [lindex $argl 1] $frm_bot]
 			if { $::crelay::debug == 1 } { dlog "Sending mode [join [lrange $argl 1 end]] to $::crelay::me(chan)" }
-			set text [::crelay::colorize "info" "*** $speaker set mode [join [lrange $argl 2 end]]"]
+			set text [::crelay::colorize "mode" "*** $speaker set mode [join [lrange $argl 2 end]]"]
 			putquick "PRIVMSG $::crelay::me(chan) :$text"
 		} else {
 			if { $::crelay::debug == 1 } { dlog "$frm_bot is unknown" }
@@ -1237,13 +1285,100 @@ namespace eval crelay {
 		}
 		return $mask
 	}
-	  
+	
+	# Split line function
+	# based on MenzAgitat procedure
+	# @see http://www.boulets.oqp.me/tcl/routines/tcl-toolbox-0014.html
+	proc split_line {data limit} {
+		incr limit -1
+		if {$limit < 9} {
+			error "limit must be higher than 9"
+		}
+		if { [::tcl::string::bytelength $data] <= $limit } {
+			return [expr {$data eq "" ? [list ""] : [split $data "\n"]}]
+		} else {
+			# Note : si l'espace le plus proche est situé à plus de 50% de la fin du
+			# fragment, on n'hésite pas à couper au milieu d'un mot.
+			set middle_pos [expr round($limit / 2.0)]
+			set output ""
+			while {1} {
+				if { ([set cut_index [::tcl::string::first "\n" $data]] != -1) && ($cut_index <= $limit)} then {
+					# On ne fait rien de plus, on vient de définir $cut_index.
+				} elseif {
+					([set cut_index [::tcl::string::last " " $data [expr {$limit + 1}]]] == -1)
+					|| ($cut_index < $middle_pos)
+				} then {
+					set new_cut_index -1
+					# On vérifie qu'on ne va pas couper dans la définition d'une couleur.
+					for {set i 0} {$i < 6} {incr i} {
+						if {
+							([::tcl::string::index $data [set test_cut_index [expr {$limit - $i}]]] eq "\003")
+							&& ([regexp {^\003([0-9]{1,2}(,[0-9]{1,2})?)} [::tcl::string::range $data $test_cut_index end]])
+						} then {
+							set new_cut_index [expr {$test_cut_index - 1}]
+						}
+					}
+					set cut_index [expr {($new_cut_index == -1) ? ($limit) : ($new_cut_index)}]
+				}
+				set new_part [::tcl::string::range $data 0 $cut_index]
+				set data [::tcl::string::range $data $cut_index+1 end]
+				if { [::tcl::string::trim [::tcl::string::map [list \002 {} \037 {} \026 {} \017 {}] [regsub -all {\003([0-9]{0,2}(,[0-9]{0,2})?)?} $new_part {}]]] ne "" } {
+					lappend output [::tcl::string::trimright $new_part]
+				} 
+				# Si, quand on enlève les espaces et les codes de formatage, il ne reste
+				# plus rien, pas la peine de continuer.
+				if { [::tcl::string::trim [::tcl::string::map [list \002 {} \037 {} \026 {} \017 {}] [regsub -all {\003([0-9]{0,2}(,[0-9]{0,2})?)?} $data {}]]] eq "" } {
+					break
+				}
+				set taglist [regexp -all -inline {\002|\003(?:[0-9]{0,2}(?:,[0-9]{0,2})?)?|\037|\026|\017} $new_part]
+				# Etat des tags "au repos"; les -1 signifient que la couleur est celle par
+				# défaut.
+				set bold 0 ; set underline 0 ; set italic 0 ; set foreground_color "-1" ; set background_color "-1" 
+				foreach tag $taglist {
+					if {$tag eq ""} {
+						continue
+					}
+					switch -- $tag {
+						"\002" { if { !$bold } { set bold 1 } { set bold 0 } }
+						"\037" { if { !$underline } { set underline 1 } { set underline 0 } }
+						"\026" { if { !$italic } { set italic 1 } { set italic 0 } }
+						"\017" { set bold 0 ; set underline 0 ; set italic 0 ; set foreground_color "-1" ; set background_color "-1" }
+						default {
+							lassign [split [regsub {\003([0-9]{0,2}(,[0-9]{0,2})?)?} $tag {\1}] ","] foreground_color background_color
+							if {$foreground_color eq ""} {
+								set foreground_color -1 ; set background_color -1
+							} elseif {($foreground_color < 10) && ([::tcl::string::index $foreground_color 0] ne "0")} {
+								set foreground_color 0$foreground_color
+							}
+							if {$background_color eq ""} {
+								set background_color -1
+							} elseif {
+								($background_color < 10)
+								&& ([::tcl::string::index $background_color 0] ne "0")
+							} then {
+								set background_color 0$background_color
+							}
+						}
+					}
+				}
+				set line_start ""
+				if {$bold} { append line_start \002 }
+				if {$underline} { append line_start \037 }
+				if {$italic} { append line_start \026 }
+				if {($foreground_color != -1) && ($background_color == -1)} { append line_start \003$foreground_color }
+				if {($foreground_color != -1) && ($background_color != -1)} { append line_start \003$foreground_color,$background_color }
+				set data ${line_start}${data}
+			}
+			return $output
+		}
+	}
+	
 	######################################
 	# proc for helping
 	#
 	# proc status
 	proc help:status { nick host handle arg } {
-		puthelp "PRIVMSG $nick :Chanrelay status for $::crelay::me(chan)@$crelay::me(network)"
+		puthelp "PRIVMSG $nick :Chanrelay status for $::crelay::me(chan)@$::crelay::me(network)"
 		puthelp "PRIVMSG $nick :\002 Global status\002"
 		puthelp "PRIVMSG $nick :\037type\037   -- | trans -|- recept |"
 		puthelp "PRIVMSG $nick :global -- | -- $::crelay::me(transmit) -- | -- $::crelay::me(receive) -- |"
